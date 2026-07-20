@@ -72,15 +72,23 @@ class CollectorHeartbeat:
         trades_15m = int(row["trades_15m"] or 0)
         snaps_15m = int(row["snapshots_15m"] or 0)
 
-        # Trades and snapshots are the live signals. Resolutions arrive once per
-        # window and lag by design, so they inform but never drive the status.
-        trade_status = self.thresholds.classify(trade_age)
-        snap_status = self.thresholds.classify(snap_age)
+        # SNAPSHOTS are the collector's own pulse: it writes one every ~5-7s
+        # regardless of market activity, so snapshot age is a true health signal.
+        #
+        # TRADE age is NOT. Trades are market-driven and legitimately bursty —
+        # ~73% of volume lands in the first 60s of a window, then the book can
+        # sit quiet for minutes. Treating trade_age as a health signal produced
+        # a permanent WARNING on a perfectly healthy collector (observed
+        # 2026-07-20: snapshot_age 1-5s, 556 trades/15min, yet trade_age 256-317s).
+        # A monitor that cries wolf is as useless as no monitor, so trade health
+        # is measured by ARRIVAL RATE (rows in the last 15 min), not recency.
         order = ["HEALTHY", "WARNING", "STALE", "CRITICAL"]
+        snap_status = self.thresholds.classify(snap_age)
+        trade_status = "HEALTHY" if trades_15m > 0 else self.thresholds.classify(trade_age)
         status = max([trade_status, snap_status], key=order.index)
 
-        # Ingestion continuity: rows can be recent yet the rate collapsed.
-        if status == "HEALTHY" and (trades_15m == 0 or snaps_15m == 0):
+        # Ingestion continuity: snapshots recent but the rate collapsed.
+        if status == "HEALTHY" and snaps_15m == 0:
             status = "WARNING"
 
         detail = {
