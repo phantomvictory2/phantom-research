@@ -92,12 +92,34 @@ n = 2,738 observations against ~2,750 resolved windows in the period ⇒ roughly
 **99.5% coverage**. Windows lacking a 240–285s snapshot are rare, so selection
 bias is negligible. Should still be confirmed with a direct query.
 
-### 4.5 TTR conditioning — **NOT TESTED**
+### 4.5 TTR conditioning — **PASSED, but with a decisive caveat**
 
-Whether the relationship holds *earlier* in the window (60s, 120s, 180s) is
-untested — the query failed on a browser timeout. **This is the test that
-determines actionability**, because a relationship that only exists at 240s+ is
-unusable given late-window liquidity is nearly absent.
+Displacement measured at each stage; outcome always at resolution.
+
+| Elapsed | n <1bp | rev <1bp | n ≥3bp | rev ≥3bp | Separation | p |
+|---|---|---|---|---|---|---|
+| 0s | 820 | 37.9% | 1,022 | **25.4%** | 1.5× | 8.5e-09 |
+| 60s | 567 | 45.3% | 1,435 | **16.9%** | 2.7× | 6.5e-40 |
+| 120s | 469 | 40.7% | 1,681 | **9.6%** | 4.2× | 1.9e-58 |
+| 180s | 383 | 37.1% | 1,803 | **4.4%** | 8.4× | 8.6e-83 |
+| 240–285s | 333 | 23.7% | ~1,845 | **~1.5%** | ~16× | 1.5e-35 |
+
+*(The raw 240s bucket spans elapsed 240–299; its last snapshot sits essentially
+at resolution and cannot reverse by construction, so the clean 240–285s
+measurement is used instead.)*
+
+**The relationship holds at every stage — and it is highly significant even at
+60s. But its discriminative power grows monotonically through the window, which
+creates the central problem for tradability:**
+
+- At **60s**, where ~73% of all volume trades, a ≥3bp displacement **still
+  reverses 16.9% of the time** — roughly 1 in 6.
+- At **240s+**, where reversal risk falls to ~1.5% (1 in 67), **liquidity is
+  nearly absent** (prior work: only 32 fills ever recorded in the final 15s).
+
+**The signal is weakest exactly where you can trade, and strongest where you
+cannot.** This is a classic information/liquidity tradeoff and it is the single
+most important constraint on any strategy built from H003.
 
 ## 5. Practical interpretation
 
@@ -114,10 +136,12 @@ EV gain.
 
 ## 6. Why NOT ROBUSTNESS_VALIDATED
 
-Three gaps prevent the higher evidence level:
+Two gaps remain, and one finding actively argues against tradability:
 
-1. **TTR conditioning untested** (§4.5) — the actionability question.
-2. **Survivorship inferred, not queried** (§4.4).
+1. **Survivorship inferred, not queried** (§4.4).
+2. **TTR conditioning reveals an information/liquidity tradeoff** (§4.5): the
+   protective effect is weak (16.9% reversal at ≥3bp) in the liquid part of the
+   window and only becomes strong where liquidity has evaporated.
 3. **Most importantly: low reversal risk ≠ profitable trade.** The
    price-conditioning analysis showed Polymarket largely prices displacement in
    — the favourite's mid rises 0.81 → 0.94 across the bands. A residual +4–5
@@ -152,9 +176,11 @@ FROM obs GROUP BY band ORDER BY band;
 
 ## 8. Next experiments
 
-1. **TTR conditioning** — close §4.5. Determines whether this is actionable.
+1. **Executability study** — now the decisive experiment. Measure spread,
+   depth and realistic fills at 60s / 120s / 180s, where the signal is weaker
+   but tradable, rather than at 240s+ where it is strong but unfillable.
 2. **Direct survivorship query** — close §4.4.
-3. **Executability study** — spread, depth and realistic fills at 240–285s.
+3. **Original executability framing** — spread, depth and realistic fills at 240–285s.
    This decides whether the +4–5 point gap is money or an artefact of quoting
    midpoints. Until then, no strategy change is justified.
 
