@@ -187,3 +187,79 @@ FROM obs GROUP BY band ORDER BY band;
 ---
 
 **Phantom V2 was not modified. The Last Shadow 3bp gate was not changed.**
+
+---
+
+# ADDENDUM — Executability Study (20 July 2026)
+
+**Question:** does H003's statistical relationship survive the price you'd
+actually pay?
+
+**Method:** entry taken at the **ask**, not the midpoint. UP entries use
+`up_ask` directly; DOWN entries use `1 − up_bid` (the binary-market identity,
+since the collector stores bid/ask for the UP side only). Buy the displaced
+side, hold to resolution, payout 1 or 0.
+
+## Results — real executable prices
+
+| t | Band | n | Spread | Entry (ask) | Win% | Implied | Edge | EV/$1 | EV−1% | Robust? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 60s | <1bp | 84 | 0.0177 | 0.5456 | 52.4% | 54.6% | −2.2 | −0.040 | −0.050 | no |
+| 60s | 1–3bp | 127 | 0.0192 | 0.6159 | 63.0% | 61.6% | +1.4 | +0.023 | +0.013 | no |
+| 60s | 3–7bp | 109 | 0.0191 | 0.6859 | 74.3% | 68.6% | +5.7 | +0.083 | +0.073 | no |
+| 60s | 7bp+ | 46 | 0.0148 | 0.7957 | 80.4% | 79.6% | +0.9 | +0.011 | +0.001 | no |
+| 120s | <1bp | 77 | 0.0208 | 0.5452 | 50.6% | 54.5% | −3.9 | −0.071 | −0.081 | no |
+| 120s | 1–3bp | 113 | 0.0200 | 0.6312 | 63.7% | 63.1% | +0.6 | +0.010 | −0.001 | no |
+| 120s | 3–7bp | 144 | 0.0197 | 0.7310 | 79.9% | 73.1% | +6.8 | +0.093 | +0.083 | borderline |
+| 120s | 7bp+ | 52 | 0.0160 | 0.8355 | 94.2% | 83.5% | +10.7 | +0.128 | +0.118 | **yes** |
+| 180s | <1bp | 88 | 0.0183 | 0.5294 | 63.6% | 52.9% | +10.7 | +0.202 | +0.192 | **yes** |
+| 180s | 1–3bp | 127 | 0.0235 | 0.6633 | 68.5% | 66.3% | +2.2 | +0.033 | +0.023 | no |
+| 180s | 3–7bp | 131 | 0.0179 | 0.7635 | 86.3% | 76.3% | +9.9 | +0.130 | +0.120 | **yes** |
+| 180s | 7bp+ | 54 | 0.0166 | 0.8623 | 96.3% | 86.2% | +10.1 | +0.117 | +0.107 | **yes** |
+
+"Robust?" = EV still positive using the **pessimistic** (lower 95% Wilson) bound
+on the win rate.
+
+## Verdict — H003 does NOT convert to a demonstrated edge where liquidity is
+
+**At 60s — where ~73% of all volume trades — no band survives.** Edges are
++0.9 to +5.7pp and every one collapses under its own confidence interval. The
+market is priced close to efficiently at the moment you can actually transact.
+
+**Spread is the mechanism.** At ~1.8–2.4¢ on prices of 0.55–0.86, the round-trip
+cost consumes most of a 2–6pp edge before any fee is applied.
+
+**Apparent edges appear only at 120–180s**, i.e. *after* the liquidity peak —
+the same information/liquidity tension found in §4.5, now confirmed with real
+prices rather than midpoints.
+
+## Why this is NOT a green light
+
+1. **No depth data.** `snapshots` stores no size. We know the ask *price*, not
+   how much is available at it. The wallet study found average fills of
+   \$13–80 — an edge that cannot be scaled is not a business.
+2. **Multiple comparisons.** 12 cells were tested; 4 "survive". No Bonferroni
+   or FDR correction has been applied. Some survivors are likely noise.
+3. **Averaging bias.** EV is computed from *average* ask and *average* win rate
+   per cell, not per-window. Jensen's inequality makes this an approximation.
+4. **The 180s <1bp cell (+0.202) is suspicious** — flat windows should be the
+   *least* informative, yet it shows the largest EV. Most likely small-sample
+   noise (n=88); treat as a red flag on the method, not a discovery.
+5. **No slippage or partial-fill modelling.** The −1% column is a placeholder,
+   not a calibrated cost model from `execution_journal`.
+
+## Status
+
+**H003 remains SUPPORTED / STATISTICALLY_SUPPORTED — and explicitly NOT
+tradable.** The executability study was designed to kill the idea and it
+substantially did so for the liquid part of the window. The 120–180s residual
+is a *lead worth testing properly*, not an edge.
+
+**No strategy change is justified. The Last Shadow 3bp gate remains unchanged.**
+
+## Required before any strategy work
+
+1. **Collect order-book depth** — without size at the ask, none of this is
+   actionable. This is now the top data-collection priority.
+2. **Per-window EV** with multiple-comparison correction.
+3. **Calibrate costs from `execution_journal`** real slippage, not a 1% guess.
