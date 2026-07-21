@@ -84,6 +84,13 @@ class Settings:
     telegram_bot_token: str = field(default_factory=lambda: _env("RESEARCH_TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: _env("RESEARCH_TELEGRAM_CHAT_ID", ""))
 
+    # ── Storage monitoring ───────────────────────────────────────────────────
+    # Railway usage alerts require the Pro plan, so the engine watches capacity
+    # itself. Defaults match the current 5GB volume.
+    storage_capacity_mb: int = field(default_factory=lambda: _int("STORAGE_CAPACITY_MB", 5000))
+    storage_warning_pct: float = field(default_factory=lambda: _float("STORAGE_WARNING_PCT", 70.0))
+    storage_critical_pct: float = field(default_factory=lambda: _float("STORAGE_CRITICAL_PCT", 85.0))
+
     # ── Data quality ─────────────────────────────────────────────────────────
     # A window with no snapshot for this long counts as a collection gap.
     gap_threshold_s: int = field(default_factory=lambda: _int("GAP_THRESHOLD_S", 120))

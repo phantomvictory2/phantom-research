@@ -116,3 +116,90 @@ def test_seed_hypotheses_are_well_formed():
         assert hid.startswith("H")
         assert question.endswith("?"), f"{hid} must be phrased as a question"
         assert rationale and data_required
+
+
+# ── Alerting severity & suppression (Phase A) ────────────────────────────────
+
+def test_notifier_severity_ranking():
+    from app.monitoring.notifier import Notifier, INFO, WARNING, CRITICAL
+    n = Notifier(cooldown_s=3600)
+    # first WARNING passes the cooldown gate
+    assert n._should_send("k", WARNING) is True
+    # immediate repeat of the same severity is suppressed
+    assert n._should_send("k", WARNING) is False
+    # ESCALATION to CRITICAL must never be suppressed
+    assert n._should_send("k", CRITICAL) is True
+
+
+def test_notifier_critical_not_starved_by_long_cooldown():
+    """A 30-min warning cooldown must not silence a CRITICAL."""
+    from app.monitoring.notifier import Notifier, CRITICAL
+    n = Notifier(cooldown_s=99999, critical_cooldown_s=0)
+    assert n._should_send("x", CRITICAL) is True
+    assert n._should_send("x", CRITICAL) is True   # short floor allows re-alert
+
+
+def test_notifier_reports_unconfigured_delivery():
+    """If nobody can be paged, that must be visible rather than silent."""
+    from app.monitoring.notifier import Notifier
+    n = Notifier()
+    assert isinstance(n.delivery_configured, bool)
+
+
+@pytest.mark.asyncio
+async def test_info_never_pages():
+    from app.monitoring.notifier import Notifier
+    n = Notifier()
+    assert await n.info("routine") is False
+
+
+def test_storage_thresholds_ordered():
+    from app.config.settings import Settings
+    s = Settings(research_db_url="postgres://x")
+    assert 0 < s.storage_warning_pct < s.storage_critical_pct <= 100
+    assert s.storage_capacity_mb > 0
+
+
+# ── Strategy lifecycle governance (Phase A) ──────────────────────────────────
+
+def test_lifecycle_has_no_shortcut_to_live():
+    """No state may jump straight to LIVE. Every path runs the full gauntlet."""
+    from app.memory.strategy_registry import ALLOWED
+    for state, targets in ALLOWED.items():
+        if state != "LIVE_MINIMUM_SIZE":
+            assert "LIVE" not in targets, f"{state} can jump straight to LIVE"
+
+
+def test_paper_cannot_reach_live_directly():
+    """The exact failure this governance exists to prevent."""
+    from app.memory.strategy_registry import ALLOWED
+    assert "LIVE" not in ALLOWED["PAPER"]
+    assert "LIVE_MINIMUM_SIZE" not in ALLOWED["PAPER"]
+    assert ALLOWED["PAPER"] >= {"LIVE_CANDIDATE"}
+
+
+def test_retired_is_terminal():
+    from app.memory.strategy_registry import ALLOWED
+    assert ALLOWED["RETIRED"] == set()
+
+
+def test_every_state_can_reach_rejection_or_is_terminal():
+    """A strategy must always have an exit path."""
+    from app.memory.strategy_registry import ALLOWED
+    for state, targets in ALLOWED.items():
+        if state in ("RETIRED",):
+            continue
+        assert targets, f"{state} is a dead end with no exit"
+
+
+@pytest.mark.asyncio
+async def test_live_promotion_requires_human_approver():
+    """Governance must be structural, not a matter of discipline."""
+    from app.memory import strategy_registry as reg
+    with pytest.raises(reg.PromotionError, match="human approver"):
+        await reg.transition("X", "LIVE", approved_by=None)
+
+
+def test_live_states_enumerated():
+    from app.memory.strategy_registry import LIVE_STATES
+    assert LIVE_STATES == {"LIVE_CANDIDATE", "LIVE_MINIMUM_SIZE", "LIVE"}

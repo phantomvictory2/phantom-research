@@ -17,7 +17,7 @@ from typing import Optional
 
 from app.config.settings import settings
 from app.database.pool import research_ro, research_rw
-from app.monitoring.notifier import Notifier
+from app.monitoring.notifier import Notifier, WARNING, CRITICAL
 
 logger = logging.getLogger("research.heartbeat")
 
@@ -54,7 +54,8 @@ SELECT
     (SELECT EXTRACT(EPOCH FROM (now() - max(ts)))         FROM snapshots)   AS snapshot_age_s,
     (SELECT EXTRACT(EPOCH FROM (now() - max(resolved_at))) FROM resolutions) AS resolution_age_s,
     (SELECT count(*) FROM trades    WHERE trade_ts > now() - interval '15 minutes') AS trades_15m,
-    (SELECT count(*) FROM snapshots WHERE ts       > now() - interval '15 minutes') AS snapshots_15m
+    (SELECT count(*) FROM snapshots WHERE ts       > now() - interval '15 minutes') AS snapshots_15m,
+    (SELECT pg_database_size(current_database())) AS db_bytes
 """
 
 
@@ -107,12 +108,48 @@ class CollectorHeartbeat:
             detail=detail,
         )
         await self._persist(report)
-        if report.is_alerting():
+
+        # Severity mapping: STALE is a warning, CRITICAL pages. A CRITICAL here
+        # means data has stopped arriving — the 2026-07-17 failure mode.
+        if report.status == "CRITICAL":
             await self.notifier.alert(
-                f"🔴 [RESEARCH] Collector {report.status}\n{report.summary()}",
-                key="collector_health",
-            )
+                f"Collector CRITICAL — data has stopped arriving.\n{report.summary()}",
+                key="collector_health", severity=CRITICAL)
+        elif report.status == "STALE":
+            await self.notifier.alert(
+                f"Collector STALE.\n{report.summary()}",
+                key="collector_health", severity=WARNING)
+        elif report.status == "WARNING":
+            await self.notifier.alert(
+                f"Collector degraded.\n{report.summary()}",
+                key="collector_health", severity=WARNING)
+
+        await self._check_storage(row)
         return report
+
+    async def _check_storage(self, row):
+        """Storage headroom. The volume filling to 100% is precisely what caused
+        the 2026-07-17 outage, and Railway's own usage alerts are Pro-plan only —
+        so we monitor it ourselves."""
+        try:
+            db_bytes = int(row["db_bytes"] or 0)
+        except (KeyError, TypeError):
+            return
+        cap = settings.storage_capacity_mb * 1024 * 1024
+        if cap <= 0:
+            return
+        pct = db_bytes / cap * 100.0
+        mb = db_bytes / 1024 / 1024
+        msg = (f"Research_DB storage {pct:.1f}% of {settings.storage_capacity_mb}MB "
+               f"({mb:.0f}MB used)")
+        if pct >= settings.storage_critical_pct:
+            await self.notifier.alert(
+                msg + " — CRITICAL. Writes will fail when full; the collector "
+                      "cannot self-heal from this.",
+                key="db_storage", severity=CRITICAL)
+        elif pct >= settings.storage_warning_pct:
+            await self.notifier.alert(msg + " — approaching capacity.",
+                                      key="db_storage", severity=WARNING)
 
     async def _persist(self, r: HealthReport):
         """Record every check. Failure to record must never crash the monitor."""
