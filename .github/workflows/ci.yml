@@ -1,0 +1,72 @@
+name: CI
+
+# A failing check here must block deployment. Railway auto-deploys on push to
+# main, so this workflow is the last gate before code reaches a running service.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      # ── Gate 1: every file must parse ────────────────────────────────────
+      - name: Syntax check (all modules)
+        run: |
+          python -m compileall -q app scripts tests service.py
+
+      # ── Gate 2: file integrity ───────────────────────────────────────────
+      # Motivated by a real incident: eight files were silently truncated by a
+      # mount sync fault. main.py failed loudly, but risk_engine.py still
+      # COMPILED while having lost its final `return {"status": "APPROVED"}` —
+      # every signal would have evaluated to None in production. Compilation is
+      # not correctness. This gate checks structural completeness.
+      - name: Integrity check (truncation detection)
+        run: python tests/integrity_check.py
+
+      # ── Gate 3: imports actually resolve ─────────────────────────────────
+      - name: Import check
+        run: |
+          python -c "import app.config.settings, app.database.pool, app.monitoring.heartbeat, app.monitoring.notifier, app.data_quality.checks, app.quant.baseline, app.memory.hypotheses, app.reports.baseline_report; print('all modules import cleanly')"
+
+      # ── Gate 4: lint ─────────────────────────────────────────────────────
+      - name: Lint
+        run: ruff check app scripts tests service.py --select=E9,F63,F7,F82
+
+      # ── Gate 5: secret scan ──────────────────────────────────────────────
+      # This service must never carry trading credentials, and no real DSN
+      # should ever be committed.
+      - name: Secret scan
+        run: |
+          set +e
+          FOUND=0
+          if grep -rInE "postgres(ql)?://[^ '\"]*:[^ '\"]*@" --include="*.py" --include="*.yml" --include="*.md" . \
+             | grep -v "user:pass@host" | grep -v "\.git/"; then
+            echo "::error::Hardcoded database credential detected"; FOUND=1
+          fi
+          if grep -rInE "(POLY_PRIVATE_KEY|POLY_API_SECRET|ghp_[A-Za-z0-9]{20,})" --include="*.py" --include="*.yml" . \
+             | grep -v "\.git/" | grep -v "never" | grep -v "NEVER"; then
+            echo "::error::Trading credential or GitHub token detected"; FOUND=1
+          fi
+          exit $FOUND
+
+      # ── Gate 6: tests ────────────────────────────────────────────────────
+      - name: Unit tests
+        run: python -m pytest tests/ -q --tb=short
+
+      - name: Deploy eligibility
+        run: echo "All gates passed — safe to deploy"
