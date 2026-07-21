@@ -50,6 +50,15 @@ jobs:
       # ── Gate 5: secret scan ──────────────────────────────────────────────
       # This service must never carry trading credentials, and no real DSN
       # should ever be committed.
+      #
+      # SELF-MATCH HAZARD (CI #1, 2026-07-21): the first version of this gate
+      # failed on its own source. It greps *.yml for a token pattern, and the
+      # pattern literal lives in this file — so the scanner detected itself.
+      # Excluding .github/ would fix it by creating a blind spot exactly where
+      # secrets are most often leaked (workflow files). Instead the patterns are
+      # written with single-character classes — gh[p]_ matches "ghp_" in real
+      # code, but the literal text "gh[p]_" written here does not match it.
+      # Keep this style for any pattern added below.
       - name: Secret scan
         run: |
           set +e
@@ -58,7 +67,8 @@ jobs:
              | grep -v "user:pass@host" | grep -v "\.git/"; then
             echo "::error::Hardcoded database credential detected"; FOUND=1
           fi
-          if grep -rInE "(POLY_PRIVATE_KEY|POLY_API_SECRET|ghp_[A-Za-z0-9]{20,})" --include="*.py" --include="*.yml" . \
+          if grep -rInE "(POLY_PRIVATE_KE[Y]|POLY_API_SECRE[T]|gh[p]_[A-Za-z0-9]{20,}|github_pa[t]_[A-Za-z0-9_]{20,})" \
+             --include="*.py" --include="*.yml" --include="*.md" . \
              | grep -v "\.git/" | grep -v "never" | grep -v "NEVER"; then
             echo "::error::Trading credential or GitHub token detected"; FOUND=1
           fi
