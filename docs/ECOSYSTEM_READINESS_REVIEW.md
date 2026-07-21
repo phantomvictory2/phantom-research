@@ -228,10 +228,12 @@ re-queries are wasteful but not yet material.
   shipped broken code to Railway; a CI gate would have caught it.
 - **No rollback procedure** beyond manually redeploying an old commit.
 - **No versioning or release process.** No tags, no changelog, no semver.
-- **No alerting.** The heartbeat writes `research.system_health` — and **nobody
-  is paged from it.** Telegram credentials for the research service were never
-  configured, so it is monitoring into a void. **P0 — this is the exact gap that
-  allowed the 60-hour outage.**
+- ~~**No alerting.**~~ **RESOLVED 2026-07-21.** Telegram credentials are
+  configured on `phantom-research`, and delivery was proven by a live-fire test
+  (storage threshold temporarily lowered below actual usage; a real WARNING was
+  fired and received on the operator's phone; threshold restored). The gap that
+  allowed the 60-hour outage to stay invisible is closed. Remaining alerting
+  gap: nothing watches the *trading bot's* liveness — only the collector's.
 - Health checks exist for the collector only; nothing watches the trading bot's
   own liveness.
 
@@ -265,7 +267,7 @@ registry, message bus. The deterministic layer isn't finished.
 
 | # | Pri | Problem | Recommendation | Effort |
 |---|---|---|---|---|
-| 1 | **P0** | Heartbeat monitors into a void | Wire Telegram alerting for the research service | 1h |
+| 1 | ~~P0~~ **DONE 2026-07-21** | Heartbeat monitored into a void | Telegram alerting wired **and proven by live-fire test** | ✅ |
 | 2 | **P0** | No backups on irreplaceable data | Enable Research_DB backups | 30m |
 | 3 | **P0** | Prod/Test diverged, no promotion path | Define and document promotion; reconcile or formally fork | 1d |
 | 4 | **P0** | Broken code can ship | GitHub Actions running pytest on push | 2h |
@@ -300,8 +302,8 @@ registry, message bus. The deterministic layer isn't finished.
 | Dashboard | 7/10 | Functional, dynamic; computation in wrong layer |
 | Security | 5/10 | No trading creds exposed; credential hygiene lapses |
 | Testing | 6/10 | 98 unit tests; no integration/soak/chaos |
-| Monitoring | 5/10 | Heartbeat exists; **nobody is alerted** |
-| DevOps | **4/10** | No CI, no rollback, no versioning, no alerting |
+| Monitoring | 7/10 | Heartbeat + alerting **verified end-to-end**; bot liveness unwatched |
+| DevOps | 6/10 | Alerting live, versioned changelog; CI written but not enforced |
 | Documentation | 7/10 | Excellent research docs; zero runbooks |
 | **Overall** | **6/10** | Strong research, immature operations |
 

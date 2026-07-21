@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: semantic.
 Production should run a **known version**, never "whatever is on main".
 Rollback: redeploy the previous tag in Railway → Deployments → Redeploy.
 
+## [v0.3.1] — 2026-07-21 — Alerting verified end-to-end
+
+### Verified
+- **Telegram delivery is live and PROVEN.** `RESEARCH_TELEGRAM_BOT_TOKEN` and
+  `RESEARCH_TELEGRAM_CHAT_ID` set on the `phantom-research` Railway service;
+  the "ALERT DELIVERY UNCONFIGURED" startup warning no longer appears.
+- **Live-fire test performed, not assumed.** `STORAGE_WARNING_PCT` was
+  temporarily lowered to 5 (against ~7% actual usage) so the heartbeat crossed
+  a real threshold and fired a genuine WARNING through the real Telegram path.
+  Alert received on the operator's phone. Threshold restored to 70.
+- This closes readiness review **P0 #1** ("heartbeat monitors into a void").
+  The monitor is no longer theoretical: it has been observed to page a human.
+
+### Note
+Only the storage path has been exercised end-to-end. The collector-CRITICAL
+path shares the same `Notifier.alert()` delivery code, so delivery is proven,
+but the *trigger* for a collector outage has not itself been fired in anger.
+
 ## [v0.3.0] — 2026-07-20 — Institutional Foundation (Phase A)
 
 ### Added
