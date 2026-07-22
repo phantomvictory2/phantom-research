@@ -236,16 +236,17 @@ async def run_features(max_windows: int = 300, cfg: FeatureConfig = None) -> dic
             "bid_size": r["bid_size"], "ask_size": r["ask_size"],
         } for r in recs]
         feats = compute_window_features(ticks, cfg)
-        for f in feats:
-            await research_rw.execute_write(
-                _UPSERT_SQL,
-                f["slug"], f["duration"], f["elapsed_s"], f["computed_at"],
-                f["up_mid"], f["up_best_bid"], f["up_best_ask"],
-                f["up_best_bid_size"], f["up_best_ask_size"], f["book_imbalance"],
-                f["size_at_ask"], f["spot_momentum_bp"], f["spot_displacement_bp"],
-                f["regime_label"], f["feature_version"],
-            )
-            rows_written += 1
+        # One batched round-trip per window instead of one per row, so the boot
+        # bootstrap and periodic refresh cannot block the heartbeat for minutes.
+        batch = [(
+            f["slug"], f["duration"], f["elapsed_s"], f["computed_at"],
+            f["up_mid"], f["up_best_bid"], f["up_best_ask"],
+            f["up_best_bid_size"], f["up_best_ask_size"], f["book_imbalance"],
+            f["size_at_ask"], f["spot_momentum_bp"], f["spot_displacement_bp"],
+            f["regime_label"], f["feature_version"],
+        ) for f in feats]
+        await research_rw.execute_write_many(_UPSERT_SQL, batch)
+        rows_written += len(batch)
         windows += 1
     logger.info("features: %d windows, %d rows upserted", windows, rows_written)
     return {"windows": windows, "rows": rows_written, "version": cfg.version}

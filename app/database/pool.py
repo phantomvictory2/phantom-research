@@ -109,6 +109,27 @@ class ResearchPool:
         async with pool.acquire() as conn:
             return await conn.execute(query, *args)
 
+    async def execute_write_many(self, query: str, rows):
+        """Batched write to research.* only (one round-trip for many rows).
+        Same schema guard as execute_write. Refuses non-research writes."""
+        if self.read_only:
+            raise PermissionError(
+                f"[{self.name}] is a read-only pool; writes are not permitted"
+            )
+        lowered = " ".join(query.lower().split())
+        if _WRITE_SCHEMA not in lowered:
+            raise PermissionError(
+                "Research writes must target the 'research' schema. "
+                f"Refused query: {query[:120]}"
+            )
+        rows = list(rows)
+        if not rows:
+            return
+        pool = await self.connect()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.executemany(query, rows)
+
     async def execute_migration(self, sql: str):
         """Run a migration script (research schema DDL). Explicit and separate."""
         if self.read_only:
