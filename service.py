@@ -22,6 +22,10 @@ from app.config.settings import settings                    # noqa: E402
 from app.database.pool import research_rw, close_all        # noqa: E402
 from app.monitoring.heartbeat import CollectorHeartbeat     # noqa: E402
 from app.memory import hypotheses                           # noqa: E402
+from app.quant.features import run_features                 # noqa: E402
+
+# Recompute the feature layer every N heartbeat cycles (~10 min at 60s).
+FEATURE_EVERY = 10
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -43,6 +47,12 @@ async def bootstrap():
         log.info("hypotheses seeded")
     except Exception as e:
         log.error("hypothesis seeding failed: %s", e)
+    # Populate the Phase 2 feature layer once on boot (bounded). Fail-soft.
+    try:
+        summary = await run_features(max_windows=60)
+        log.info("features bootstrapped: %s", summary)
+    except Exception as e:
+        log.error("feature bootstrap failed: %s", e)
 
 
 async def main():
@@ -60,6 +70,7 @@ async def main():
     interval = settings.heartbeat_interval_s
     log.info("heartbeat loop every %ss", interval)
 
+    cycle = 0
     while True:
         try:
             report = await hb.check()
@@ -71,6 +82,16 @@ async def main():
         except Exception as e:
             # A monitoring failure must never kill the monitor.
             log.error("heartbeat check failed: %s", e, exc_info=True)
+
+        # Keep the feature layer fresh on recent windows. Fail-soft; a feature
+        # error must never stop the heartbeat.
+        if cycle % FEATURE_EVERY == 0:
+            try:
+                summary = await run_features(max_windows=20)
+                log.info("features refreshed: %s", summary)
+            except Exception as e:
+                log.error("feature refresh failed: %s", e)
+        cycle += 1
         await asyncio.sleep(interval)
 
 
