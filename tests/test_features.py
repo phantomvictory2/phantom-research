@@ -8,6 +8,8 @@ The leakage test is structural: it recomputes each row against only the ticks up
 to and including that tick and asserts the value is unchanged.
 """
 
+from decimal import Decimal
+
 import pytest
 
 from app.quant.features import (
@@ -105,6 +107,25 @@ def test_no_lookahead_each_row_depends_only_on_past():
         assert _strip(full[i]) == _strip(truncated[-1]), (
             f"row {i} changed when future ticks were removed — look-ahead leak"
         )
+
+
+def test_decimal_inputs_do_not_crash():
+    """Live regression: snapshots return NUMERIC as Decimal; Decimal * float must
+    not raise. The engine must coerce and produce the same numbers as floats."""
+    dec_window = [
+        {"slug": "s", "duration": "5m", "elapsed_s": 0,
+         "btc_price": Decimal("100000"), "up_mid": Decimal("0.5"),
+         "up_bid": Decimal("0.49"), "up_ask": Decimal("0.51"),
+         "bid_size": Decimal("1000"), "ask_size": Decimal("800")},
+        {"slug": "s", "duration": "5m", "elapsed_s": 20,
+         "btc_price": Decimal("100100"), "up_mid": Decimal("0.5"),
+         "up_bid": Decimal("0.49"), "up_ask": Decimal("0.51"),
+         "bid_size": Decimal("1000"), "ask_size": Decimal("1000")},
+    ]
+    rows = compute_window_features(dec_window)
+    assert rows[1]["spot_displacement_bp"] == pytest.approx(10.0)
+    assert rows[0]["book_imbalance"] == pytest.approx(0.1111, abs=1e-4)
+    assert isinstance(rows[0]["up_mid"], float)
 
 
 def test_mutating_a_future_tick_cannot_change_an_earlier_row():

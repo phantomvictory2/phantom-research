@@ -120,7 +120,22 @@ def compute_window_features(ticks, cfg: FeatureConfig = None) -> list:
     only ticks[0..i]; mutating any tick j > i cannot change row i.
     """
     cfg = cfg or FeatureConfig()
-    ticks = sorted(ticks, key=lambda t: t["elapsed_s"])
+
+    # Normalize numeric fields to float. Postgres NUMERIC columns arrive as
+    # decimal.Decimal via asyncpg, and Decimal * float raises TypeError. Coercing
+    # once here keeps every downstream computation float-safe regardless of caller.
+    def _f(x):
+        return float(x) if x is not None else None
+
+    ticks = [{
+        **t,
+        "btc_price": _f(t.get("btc_price")),
+        "up_mid": _f(t.get("up_mid")),
+        "up_bid": _f(t.get("up_bid")),
+        "up_ask": _f(t.get("up_ask")),
+        "bid_size": _f(t.get("bid_size")),
+        "ask_size": _f(t.get("ask_size")),
+    } for t in sorted(ticks, key=lambda t: t["elapsed_s"])]
     out = []
     now = datetime.now(timezone.utc)
     for i, t in enumerate(ticks):
