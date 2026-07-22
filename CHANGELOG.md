@@ -5,6 +5,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: semantic.
 Production should run a **known version**, never "whatever is on main".
 Rollback: redeploy the previous tag in Railway → Deployments → Redeploy.
 
+## [v0.6.0] — 2026-07-22 — Phase 2: deterministic feature engine
+
+### Added
+- **`research.features`** (migration 005) — the authoritative feature contract
+  the Phase 3+ research brain (built in Antigravity) consumes. One row per
+  (slug, elapsed_s): book_imbalance, size_at_ask, spot_momentum_bp,
+  spot_displacement_bp, regime_label, plus price context. Every value is as-of
+  the tick — no look-ahead.
+- **`app/quant/features.py`** — pure feature math (no DB, unit-testable) + async
+  compute/upsert. Wired into the service loop: bootstrapped on boot, refreshed
+  periodically, fail-soft so a feature error can never stop the heartbeat.
+- **6 feature tests** — golden-value, a structural leakage guarantee (each row
+  recomputed against only past ticks), and a Decimal-input regression.
+- **`execute_write_many`** batched writer on the research pool.
+
+### Fixed (caught in live observation, not review)
+- Live NUMERIC columns arrive as `decimal.Decimal`; `Decimal * float` crashed
+  the first run. Now coerced to float at the engine boundary. The fail-soft
+  design meant the heartbeat kept running through the error.
+- Per-row upserts (~2.9k round-trips) were blocking startup and delaying the
+  heartbeat. Switched to one `executemany` per window: 60 windows / 2,881 rows
+  in ~44s. Verified live: `features bootstrapped: {windows:60, rows:2881}`.
+
+### Verified
+research.features populated live (2,881 rows / 60 windows) and self-refreshing.
+32 tests passing (was 25). No Phantom V2 files touched.
+
 ## [v0.5.0] — 2026-07-22 — Phase 2: order-book depth collection
 
 ### Added
