@@ -41,7 +41,7 @@ jobs:
       # ── Gate 3: imports actually resolve ─────────────────────────────────
       - name: Import check
         run: |
-          python -c "import app.config.settings, app.database.pool, app.monitoring.heartbeat, app.monitoring.notifier, app.data_quality.checks, app.quant.baseline, app.memory.hypotheses, app.reports.baseline_report; print('all modules import cleanly')"
+          python -c "import app.config.settings, app.database.pool, app.monitoring.heartbeat, app.monitoring.notifier, app.data_quality.checks, app.quant.baseline, app.quant.features, app.memory.hypotheses, app.reports.baseline_report; print('all modules import cleanly')"
 
       # ── Gate 4: lint ─────────────────────────────────────────────────────
       - name: Lint
