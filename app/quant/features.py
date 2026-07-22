@@ -17,6 +17,7 @@ Design:
 No look-ahead. No LLM. No dependency on Phantom V2.
 """
 
+import asyncio
 import logging
 import statistics
 from dataclasses import dataclass, field
@@ -25,7 +26,7 @@ from typing import Optional
 
 logger = logging.getLogger("research.features")
 
-FEATURE_VERSION = "v1"
+FEATURE_VERSION = "v2"  # v2: bid/ask sourced from book_depth (snapshot /price was swapped)
 
 
 @dataclass(frozen=True)
@@ -166,14 +167,20 @@ def compute_window_features(ticks, cfg: FeatureConfig = None) -> list:
 # Snapshot is the spine (has up_mid, btc_price, up_bid/ask); order-book depth is
 # joined by NEAREST capture time within a small tolerance, because the collector
 # writes the snapshot and the book on the same tick but a second or two apart.
+# Bid/ask and sizes come from book_depth (the /book endpoint, authoritatively
+# labeled), NOT from the snapshot /price columns — those were proven swapped on
+# 2026-07-22 (Polymarket /price uses order-book-side semantics). Snapshot remains
+# the spine only for up_mid + btc_price (midpoint is symmetric, unaffected).
 _WINDOW_SQL = """
 SELECT s.slug, s.duration, s.elapsed_s, s.ts,
-       s.up_mid, s.up_bid, s.up_ask, s.btc_price,
+       s.up_mid, s.btc_price,
+       bd.up_best_bid  AS book_bid,
+       bd.up_best_ask  AS book_ask,
        bd.up_best_ask_size AS ask_size,
        bd.up_best_bid_size AS bid_size
 FROM snapshots s
 LEFT JOIN LATERAL (
-    SELECT up_best_ask_size, up_best_bid_size
+    SELECT up_best_bid, up_best_ask, up_best_ask_size, up_best_bid_size
     FROM book_depth b
     WHERE b.slug = s.slug
       AND b.captured_at BETWEEN s.ts - interval '5 seconds'
@@ -184,6 +191,12 @@ LEFT JOIN LATERAL (
 WHERE s.slug = $1
   AND s.elapsed_s BETWEEN 0 AND 300
 ORDER BY s.elapsed_s
+"""
+
+_ALL_SLUGS_SQL = """
+SELECT slug FROM markets
+WHERE window_ts IS NOT NULL
+ORDER BY window_ts ASC
 """
 
 _RECENT_SLUGS_SQL = """
@@ -232,7 +245,7 @@ async def run_features(max_windows: int = 300, cfg: FeatureConfig = None) -> dic
         ticks = [{
             "slug": r["slug"], "duration": r["duration"], "elapsed_s": r["elapsed_s"],
             "btc_price": r["btc_price"], "up_mid": r["up_mid"],
-            "up_bid": r["up_bid"], "up_ask": r["up_ask"],
+            "up_bid": r["book_bid"], "up_ask": r["book_ask"],
             "bid_size": r["bid_size"], "ask_size": r["ask_size"],
         } for r in recs]
         feats = compute_window_features(ticks, cfg)
@@ -250,3 +263,71 @@ async def run_features(max_windows: int = 300, cfg: FeatureConfig = None) -> dic
         windows += 1
     logger.info("features: %d windows, %d rows upserted", windows, rows_written)
     return {"windows": windows, "rows": rows_written, "version": cfg.version}
+
+
+async def _process_one(slug, cfg, research_ro, research_rw) -> int:
+    """Compute + upsert features for a single window. Returns rows written."""
+    recs = await research_ro.fetch(_WINDOW_SQL, slug)
+    if not recs:
+        return 0
+    ticks = [{
+        "slug": r["slug"], "duration": r["duration"], "elapsed_s": r["elapsed_s"],
+        "btc_price": r["btc_price"], "up_mid": r["up_mid"],
+        "up_bid": r["book_bid"], "up_ask": r["book_ask"],
+        "bid_size": r["bid_size"], "ask_size": r["ask_size"],
+    } for r in recs]
+    feats = compute_window_features(ticks, cfg)
+    batch = [(
+        f["slug"], f["duration"], f["elapsed_s"], f["computed_at"],
+        f["up_mid"], f["up_best_bid"], f["up_best_ask"],
+        f["up_best_bid_size"], f["up_best_ask_size"], f["book_imbalance"],
+        f["size_at_ask"], f["spot_momentum_bp"], f["spot_displacement_bp"],
+        f["regime_label"], f["feature_version"],
+    ) for f in feats]
+    await research_rw.execute_write_many(_UPSERT_SQL, batch)
+    return len(batch)
+
+
+async def run_backfill(batch_size: int = 100, throttle_s: float = 0.3,
+                       cfg: FeatureConfig = None) -> dict:
+    """FULL-HISTORY feature backfill over every eligible window (oldest first).
+
+    Idempotent (ON CONFLICT upsert), restartable (safe to re-run), batched and
+    throttled so it never starves the live collector. Reads raw tables read-only;
+    writes only research.features. Progress is logged per batch. A failed window
+    is logged and skipped (recoverable on a later run), never fatal.
+    """
+    from app.database.pool import research_ro, research_rw
+    cfg = cfg or FeatureConfig()
+
+    slugs = [r["slug"] for r in await research_ro.fetch(_ALL_SLUGS_SQL)]
+    total = len(slugs)
+    processed = success = failed = skipped = rows = 0
+    logger.info("BACKFILL start: %d eligible windows (batch=%d, throttle=%.2fs)",
+                total, batch_size, throttle_s)
+
+    for i, slug in enumerate(slugs, 1):
+        try:
+            n = await _process_one(slug, cfg, research_ro, research_rw)
+            if n == 0:
+                skipped += 1
+            else:
+                success += 1
+                rows += n
+        except Exception as e:
+            failed += 1
+            logger.warning("BACKFILL window %s failed: %s", slug, e)
+        processed += 1
+
+        if i % batch_size == 0 or i == total:
+            logger.info(
+                "BACKFILL progress: %d/%d (%.1f%%) success=%d skipped=%d failed=%d rows=%d",
+                processed, total, 100.0 * processed / total,
+                success, skipped, failed, rows)
+            await asyncio.sleep(throttle_s)  # be kind to the shared DB
+
+    summary = {"total": total, "processed": processed, "success": success,
+               "skipped": skipped, "failed": failed, "rows": rows,
+               "version": cfg.version}
+    logger.info("BACKFILL complete: %s", summary)
+    return summary

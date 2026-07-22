@@ -47,6 +47,16 @@ async def bootstrap():
         log.info("hypotheses seeded")
     except Exception as e:
         log.error("hypothesis seeding failed: %s", e)
+    # One-shot FULL-HISTORY backfill when requested (FEATURE_BACKFILL=1). Batched
+    # and throttled; safe to leave off after it completes. Fail-soft.
+    if os.getenv("FEATURE_BACKFILL", "0") == "1":
+        try:
+            from app.quant.features import run_backfill
+            summary = await run_backfill()
+            log.info("feature backfill: %s", summary)
+        except Exception as e:
+            log.error("feature backfill failed: %s", e)
+
     # Populate the Phase 2 feature layer once on boot (bounded). Fail-soft.
     try:
         summary = await run_features(max_windows=60)

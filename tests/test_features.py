@@ -83,7 +83,7 @@ def test_window_golden_values():
     assert r0["spot_momentum_bp"] is None
     assert r0["spot_displacement_bp"] == pytest.approx(0.0)
     assert r0["regime_label"] == "CHOP"
-    assert r0["feature_version"] == "v1"
+    assert r0["feature_version"] == "v2"
 
     # tick 4: +10bp momentum & displacement, balanced book, trending up
     assert r4["spot_momentum_bp"] == pytest.approx(10.0)
@@ -126,6 +126,27 @@ def test_decimal_inputs_do_not_crash():
     assert rows[1]["spot_displacement_bp"] == pytest.approx(10.0)
     assert rows[0]["book_imbalance"] == pytest.approx(0.1111, abs=1e-4)
     assert isinstance(rows[0]["up_mid"], float)
+
+
+def test_bidask_sourced_from_book_not_snapshot():
+    """Regression: snapshot /price up_bid/up_ask were proven swapped; bid/ask must
+    now come from book_depth (authoritative /book)."""
+    from app.quant import features as F
+    assert "bd.up_best_bid" in F._WINDOW_SQL
+    assert "bd.up_best_ask" in F._WINDOW_SQL
+    assert "s.up_bid" not in F._WINDOW_SQL and "s.up_ask" not in F._WINDOW_SQL
+    assert F.FEATURE_VERSION == "v2"
+
+
+def test_book_bidask_preserves_ordering():
+    from app.quant import features as F
+    tick = {"slug": "s", "duration": "5m", "elapsed_s": 0, "btc_price": 100000.0,
+            "up_mid": 0.55, "up_bid": 0.54, "up_ask": 0.56,
+            "bid_size": 100.0, "ask_size": 80.0}
+    r = F.compute_window_features([tick])[0]
+    assert r["up_best_bid"] == 0.54 and r["up_best_ask"] == 0.56
+    assert r["up_best_bid"] < r["up_best_ask"]      # correct, positive spread
+    assert r["feature_version"] == "v2"
 
 
 def test_mutating_a_future_tick_cannot_change_an_earlier_row():
