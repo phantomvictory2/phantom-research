@@ -303,7 +303,7 @@ registry, message bus. The deterministic layer isn't finished.
 | Security | 5/10 | No trading creds exposed; credential hygiene lapses |
 | Testing | 6/10 | 98 unit tests; no integration/soak/chaos |
 | Monitoring | 7/10 | Heartbeat + alerting **verified end-to-end**; bot liveness unwatched |
-| DevOps | 6/10 | Alerting live, versioned changelog; CI written but not enforced |
+| DevOps | 7/10 | CI enforced (Wait for CI) on all 3 research services; alerting live, versioned changelog |
 | Documentation | 7/10 | Excellent research docs; zero runbooks |
 | **Overall** | **6/10** | Strong research, immature operations |
 

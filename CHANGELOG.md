@@ -5,6 +5,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: semantic.
 Production should run a **known version**, never "whatever is on main".
 Rollback: redeploy the previous tag in Railway → Deployments → Redeploy.
 
+## [v0.4.1] — 2026-07-21 — CI extended to collector + dashboard
+
+### Added
+- **`phantom-collector` repo now has a CI pipeline** guarding BOTH services that
+  deploy from it (`phantom-collector` runs `collector.py`, `phantom-dashboard`
+  runs `streamlit run dashboard.py` — one repo, two Railway services). Five
+  gates: syntax, collector import resolution, **collector recovery-invariant
+  check**, lint, secret scan.
+- The recovery-invariant gate asserts `collector.py` still contains its
+  `psycopg2.Error` rollback+reconnect handler — the exact fix that ended the
+  2026-07-17 60-hour outage. Compilation cannot prove that handler survived a
+  truncation; this gate can.
+- **Railway "Wait for CI" enabled on both `phantom-collector` and
+  `phantom-dashboard`.** All three research-project services now hold their
+  deploy until the check suite is green.
+
+### Design notes
+- `dashboard.py` is a Streamlit script and is deliberately syntax-checked and
+  linted but never imported (importing runs `st.*` outside the runtime).
+- No unit-test gate on this repo yet — it has no tests. Tracked as a known gap,
+  not hidden. Adding smoke tests for the collector's DB-write path is the next
+  natural hardening step.
+- Gate patterns reuse the `gh[p]_` single-character-class trick so the secret
+  scanner does not match its own source (the CI #1 failure mode).
+
+### Not covered
+- The PhantomV2 / PhantomV2_test trading repos remain un-gated by design — the
+  standing instruction is not to modify Phantom V2 without explicit approval.
+
 ## [v0.4.0] — 2026-07-21 — CI enforced before deploy
 
 ### Added
