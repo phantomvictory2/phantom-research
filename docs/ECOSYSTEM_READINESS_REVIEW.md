@@ -129,9 +129,11 @@ growth, not process status. Heartbeat now runs every 60s and correctly judges
 health by *data arrival*.
 
 **Remaining gaps:**
-- **No order-book depth.** `snapshots` stores price but **no size**. This blocks
-  every execution-realism question — it is the single most valuable missing data
-  field in the ecosystem. **P1.**
+- ~~**No order-book depth.**~~ **RESOLVED 2026-07-22 (Phase 2).** The collector
+  now captures full book depth — price and size at each level of both outcome
+  books — every tick into `public.book_depth`, exposed as
+  `research.clean_book_depth`. Verified live: 241 rows / 8 windows on first
+  observation, avg UP ask size 804. This unblocks execution-realism analysis.
 - DOWN side has mid only; DOWN ask must be inferred as `1 − up_bid`.
 - ~7s snapshot cadence rules out sub-second microstructure permanently.
 - Single instance, no redundancy — one process is the entire data pipeline.
@@ -272,7 +274,7 @@ registry, message bus. The deterministic layer isn't finished.
 | 3 | **P0** | Prod/Test diverged, no promotion path | Define and document promotion; reconcile or formally fork | 1d |
 | 4 | **P0** | Broken code can ship | GitHub Actions running pytest on push | 2h |
 | 5 | **P0** | No strategy has a validated edge | Stop adding strategies until one is validated | — |
-| 6 | **P1** | No order-book depth | Extend collector `snapshots` with size | 4h |
+| 6 | ~~P1~~ **DONE 2026-07-22** | No order-book depth | `book_depth` table + `clean_book_depth` view, verified live (241 rows) | ✅ |
 | 7 | **P1** | Bankroll commingles paper/live | Filter `is_paper=false` in restore | 15m |
 | 8 | **P1** | No portfolio drawdown halt | Add ecosystem-level limit | 2h |
 | 9 | **P1** | DB credential in shell history | Rotate | 15m |

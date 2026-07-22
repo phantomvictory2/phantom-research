@@ -5,6 +5,39 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: semantic.
 Production should run a **known version**, never "whatever is on main".
 Rollback: redeploy the previous tag in Railway → Deployments → Redeploy.
 
+## [v0.5.0] — 2026-07-22 — Phase 2: order-book depth collection
+
+### Added
+- **Collector now captures order-book DEPTH** — price AND size at each level of
+  both Polymarket outcome-token books (CLOB `/book`), every tick, into a new
+  `public.book_depth` table. Price-only snapshots are unchanged.
+  - Additive-only: collector diff was 147 insertions, 0 deletions; `snapshots`
+    and the outage-recovery handler untouched. Cadence unchanged.
+  - Fail-soft: a book error rolls back and logs, never disturbing the snapshot
+    or the recovery loop.
+  - Parser (`_summarize_book`) is sort-order-agnostic (best bid = max, best ask
+    = min) and covered by 5 unit tests, now enforced by a new CI test gate.
+- **`research.clean_book_depth`** read-only view (migration 004) and a matching
+  dashboard bootstrap — guarded so a deploy before the collector's first run
+  cannot fail.
+- **Dashboard "Order-Book Depth (Phase 2)" panel** in the Research tab: row
+  count, freshness, average ask size, average imbalance.
+
+### Verified
+- Deployed through Wait for CI (all 6 gates green on GitHub's runners).
+- Startup logged `book_depth table ready ✓`; zero `book_depth capture failed`
+  warnings across the observation window.
+- **Live readout confirmed: 241 depth rows across 8 windows, avg UP ask size
+  804, avg top-level imbalance −0.048**, latest capture current. This is the
+  size-at-ask data H003 flagged as the executability blocker.
+- All SQL (table, insert, indexes, view, DO-guard) validated against the real
+  Postgres grammar (pglast) before deploy.
+
+### Known
+- Depth adds ~roughly 0.4–0.5 GB/month of writes to an **unbacked** 5GB volume
+  (user accepted this risk to proceed; Pro-plan backups planned next month).
+  The storage monitor (WARN 70% / CRIT 85%) will page before it fills.
+
 ## [v0.4.1] — 2026-07-21 — CI extended to collector + dashboard
 
 ### Added
